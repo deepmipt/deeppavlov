@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Union, Dict, TypeVar
 
 from deeppavlov.core.common.file import read_json, find_config
+from deeppavlov.core.common.registry import inverted_registry
+from deeppavlov.core.data.utils import get_all_elems_from_json
 
 # noinspection PyShadowingBuiltins
 _T = TypeVar('_T', str, float, bool, list, dict)
@@ -59,10 +61,36 @@ def _get_variables_from_config(config: Union[str, Path, dict]):
     return variables, variables_exact
 
 
+def _update_requirements(config: dict) -> None:
+    """Generates requirements for DeepPavlov model and adds them as ``metadata.requirements`` field to the passed dict.
+
+    Searches for the ``class_name`` keys in the passed config at all nesting levels. For each found component,
+    function looks for dependencies in the requirements registry. Found dependencies are added to the config
+    as ``metadata.requirements``. If the config already has ``metadata.requirements``, the existing one is complemented
+    by the found requirements.
+
+    Args:
+        config: DeepPavlov model config
+
+    """
+    components = get_all_elems_from_json(config, 'class_name')
+    components = {inverted_registry.get(component, component) for component in components}
+    requirements_registry_path = Path(__file__).parents[1] / 'common' / 'requirements_registry.json'
+    requirements_registry = read_json(requirements_registry_path)
+    requirements = []
+    for component in components:
+        requirements.extend(requirements_registry.get(component, []))
+    requirements.extend(config.get('metadata', {}).get('requirements', []))
+    config['metadata'] = config.get('metadata', {})
+    config['metadata']['requirements'] = list(set(requirements))
+
+
 def parse_config(config: Union[str, Path, dict]) -> dict:
     """Apply variables' values to all its properties"""
     if isinstance(config, (str, Path)):
         config = read_json(find_config(config))
+
+    _update_requirements(config)
 
     variables, variables_exact = _get_variables_from_config(config)
 
